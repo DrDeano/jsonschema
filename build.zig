@@ -9,8 +9,15 @@ pub fn build(b: *std.build.Builder) void {
     lib.setBuildMode(mode);
     lib.install();
 
-    const jsonschema_tests = b.addTest("src/jsonschema.zig");
+    const c_lib = b.addStaticLibrary("c_jsonschema", "src/c_jsonschema.zig");
+    c_lib.setBuildMode(mode);
+    c_lib.linkLibC();
+    c_lib.step.dependOn(&lib.step);
+    c_lib.install();
+
+    const jsonschema_tests = b.addTest("src/tests.zig");
     jsonschema_tests.setBuildMode(mode);
+    jsonschema_tests.linkLibrary(c_lib);
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&jsonschema_tests.step);
