@@ -65,6 +65,8 @@ test "JSON Schema Test Suite" {
     const test_files = .{
         test_files_dir ++ "boolean_schema.json",
         test_files_dir ++ "type.json",
+        test_files_dir ++ "maxItems.json",
+        test_files_dir ++ "minItems.json",
     };
 
     inline for (test_files) |test_file| {

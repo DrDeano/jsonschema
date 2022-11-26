@@ -42,18 +42,18 @@ const Types = struct {
         return set;
     }
 
-    pub fn compile(schema: std.json.Value) Schema.CompileError!Self {
-        switch (schema) {
-            .String => |val| return .{ .types = try Types.str_to_schema_enum(val) },
-            .Array => |array| {
+    pub fn compile(type_schema: std.json.Value) Schema.CompileError!Self {
+        return switch (type_schema) {
+            .String => |val| .{ .types = try Types.str_to_schema_enum(val) },
+            .Array => |array| brk: {
                 var comp_types_schema = std.EnumSet(Type){};
                 for (array.items) |string| {
                     comp_types_schema.setUnion(try Types.str_to_schema_enum(string.String));
                 }
-                return .{ .types = comp_types_schema };
+                break :brk .{ .types = comp_types_schema };
             },
-            else => return error.InvalidType,
-        }
+            else => error.InvalidType,
+        };
     }
 
     pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
@@ -70,11 +70,65 @@ const Types = struct {
     }
 };
 
+const MinMaxItems = struct {
+    min: i64 = 0,
+    max: ?i64 = null,
+
+    const Self = @This();
+
+    pub fn compile(min_items_schema: ?std.json.Value, max_items_schema: ?std.json.Value) Schema.CompileError!Self {
+        var range = MinMaxItems{};
+        if (min_items_schema) |min_items| {
+            switch (min_items) {
+                .Integer => |ival| range.min = ival,
+                .Float => |fval| {
+                    if (@floor(fval) == fval and @ceil(fval) == fval) {
+                        range.min = @floatToInt(i64, fval);
+                    } else {
+                        return error.InvalidFloatToInt;
+                    }
+                },
+                .NumberString => return error.TODONumberString,
+                else => return error.InvalidMinMaxItemsType,
+            }
+        }
+        if (max_items_schema) |max_items| {
+            switch (max_items) {
+                .Integer => |ival| range.max = ival,
+                .Float => |fval| {
+                    if (@floor(fval) == fval and @ceil(fval) == fval) {
+                        range.max = @floatToInt(i64, fval);
+                    } else {
+                        return error.InvalidFloatToInt;
+                    }
+                },
+                .NumberString => return error.TODONumberString,
+                else => return error.InvalidMinMaxItemsType,
+            }
+        }
+        return range;
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        switch (data) {
+            .Array => |array| {
+                var is_valid = array.items.len >= self.min;
+                if (self.max) |max| {
+                    is_valid = is_valid and array.items.len <= max;
+                }
+                return is_valid;
+            },
+            else => return true,
+        }
+    }
+};
+
 /// The root compiled schema object
 pub const Schema = union(enum) {
     Schemas: []Schema,
     Bool: bool,
     Types: Types,
+    MinMaxItems: MinMaxItems,
 
     const Self = @This();
 
@@ -82,7 +136,10 @@ pub const Schema = union(enum) {
     pub const CompileError = error{
         /// TODO top level compiler
         TODOTopLevel,
+        TODONumberString,
         InvalidType,
+        InvalidMinMaxItemsType,
+        InvalidFloatToInt,
     } || Allocator.Error;
 
     /// Error relating to the validation of JSON data against the schema
@@ -106,13 +163,20 @@ pub const Schema = union(enum) {
     ///
     pub fn compile(allocator: Allocator, schema: std.json.Value) CompileError!Self {
         return switch (schema) {
-            .Bool => |b| return Schema{ .Bool = b },
+            .Bool => |b| .{ .Bool = b },
             .Object => |object| brk: {
                 var schema_list = std.ArrayList(Schema).init(allocator);
                 errdefer schema_list.deinit();
 
                 if (object.get("type")) |type_schema| {
                     const sub_schema = Schema{ .Types = try Types.compile(type_schema) };
+                    try schema_list.append(sub_schema);
+                }
+
+                const min_items_schema = object.get("minItems");
+                const max_items_schema = object.get("maxItems");
+                if (min_items_schema != null or max_items_schema != null) {
+                    const sub_schema = Schema{ .MinMaxItems = try MinMaxItems.compile(min_items_schema, max_items_schema) };
                     try schema_list.append(sub_schema);
                 }
 
@@ -145,7 +209,6 @@ pub const Schema = union(enum) {
     pub fn validate(self: Self, data: std.json.Value) ValidateError!bool {
         return switch (self) {
             .Bool => |b| b,
-            .Types => |types| types.validate(data),
             .Schemas => |schemas| {
                 for (schemas) |schema| {
                     if (!try schema.validate(data)) {
@@ -154,6 +217,7 @@ pub const Schema = union(enum) {
                 }
                 return true;
             },
+            inline else => |sch| sch.validate(data),
         };
     }
 };

@@ -32,11 +32,11 @@ A Zig implementation of the JSON schema validator.
 - [ ] infinite-loop-detection
 - [ ] items
 - [ ] maximum
-- [ ] maxItems
+- [x] maxItems
 - [ ] maxLength
 - [ ] maxProperties
 - [ ] minimum
-- [ ] minItems
+- [x] minItems
 - [ ] minLength
 - [ ] minProperties
 - [ ] multipleOf
