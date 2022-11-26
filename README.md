@@ -50,7 +50,7 @@ A Zig implementation of the JSON schema validator.
 - [ ] ref
 - [ ] refRemote
 - [ ] required
-- [ ] type
+- [x] type
 - [ ] uniqueItems
 - [ ] unknownKeyword
 

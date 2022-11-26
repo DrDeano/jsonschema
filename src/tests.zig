@@ -17,13 +17,24 @@ test "basic" {
     var data_tree = try data_parser.parse("{}");
     defer data_tree.deinit();
 
-    const t_schema = jsonschema.Schema{ .Bool = true };
-    const f_schema = jsonschema.Schema{ .Bool = false };
+    {
+        try expect(try jsonschema.validate(std.testing.allocator, schema_tree.root, data_tree.root));
+    }
 
-    try expectError(jsonschema.Schema.CompileError.TODOTopLevel, jsonschema.validate(std.testing.allocator, schema_tree.root, data_tree.root));
-    try expectError(jsonschema.Schema.CompileError.TODOTopLevel, jsonschema.Schema.compile(std.testing.allocator, schema_tree.root));
-    try expect(!try jsonschema.Schema.validate(f_schema, data_tree.root));
-    try expect(try jsonschema.Schema.validate(t_schema, data_tree.root));
+    {
+        const comp = try jsonschema.Schema.compile(std.testing.allocator, schema_tree.root);
+        defer comp.deinit(std.testing.allocator);
+
+        try expect(try comp.validate(data_tree.root));
+    }
+
+    {
+        const t_schema = jsonschema.Schema{ .Bool = true };
+        const f_schema = jsonschema.Schema{ .Bool = false };
+
+        try expect(!try jsonschema.Schema.validate(f_schema, data_tree.root));
+        try expect(try jsonschema.Schema.validate(t_schema, data_tree.root));
+    }
 }
 
 test "c API" {
@@ -34,7 +45,8 @@ test "c API" {
     const zjs_deinit = @extern(*const fn (zjs: ?*zjs_type) void, .{ .name = "zjs_deinit", .linkage = .Strong });
 
     try expectEqual(zjs_compile(null), null);
-    try expectEqual(zjs_compile("{}"), null);
+    const ob1 = zjs_compile("{}");
+    defer zjs_deinit(ob1);
     try expectEqual(zjs_compile("8tyol8fcu"), null);
 
     try expect(!zjs_validate(null, null));
@@ -43,7 +55,7 @@ test "c API" {
     try expect(!zjs_compile_and_validate(null, null));
     try expect(!zjs_compile_and_validate(null, "{}"));
     try expect(!zjs_compile_and_validate("{}", null));
-    try expect(!zjs_compile_and_validate("{}", "{}"));
+    try expect(zjs_compile_and_validate("{}", "{}"));
 
     zjs_deinit(null);
 }
@@ -52,6 +64,7 @@ test "JSON Schema Test Suite" {
     const test_files_dir = "JSON-Schema-Test-Suite/tests/draft7/";
     const test_files = .{
         test_files_dir ++ "boolean_schema.json",
+        test_files_dir ++ "type.json",
     };
 
     inline for (test_files) |test_file| {
@@ -84,6 +97,7 @@ test "JSON Schema Test Suite" {
                     std.log.err("TODO: {s}", .{schema_stream.getWritten()});
                     return e;
                 };
+                defer compiled_schema.deinit(std.testing.allocator);
 
                 var i: usize = 0;
                 while (i < 1) : (i += 1) {

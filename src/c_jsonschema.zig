@@ -84,7 +84,7 @@ export fn zjs_compile(schema: ?[*:0]const u8) ?*zjs_type {
 ///     Whether the data is valid against the schema. Currently, if there was an error parsing
 ///     the data or invalid arguments, this will return false.
 ///
-export fn zjs_validate(zjs: ?*zjs_type, data: ?[*:0]const u8) bool {
+export fn zjs_validate(zjs: ?*align(@alignOf(jsonschema.Schema)) zjs_type, data: ?[*:0]const u8) bool {
     if (zjs) |schema_ptr| {
         const schema_comp = @ptrCast(*jsonschema.Schema, schema_ptr);
         var data_tree = parseJsonTree(data) catch return false;
@@ -119,7 +119,7 @@ export fn zjs_compile_and_validate(schema: ?[*:0]const u8, data: ?[*:0]const u8)
 /// Arguments:
 ///     IN zjs: ?*zjs_type - The opaque compiled JSON schema from zjs_compile().
 ///
-export fn zjs_deinit(zjs: ?*zjs_type) void {
+export fn zjs_deinit(zjs: ?*align(@alignOf(jsonschema.Schema)) zjs_type) void {
     if (zjs) |schema_ptr| {
         const schema_comp = @ptrCast(*jsonschema.Schema, schema_ptr);
         allocator.destroy(schema_comp);
