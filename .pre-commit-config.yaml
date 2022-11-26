@@ -1,0 +1,7 @@
+repos:
+  - repo: https://github.com/batmac/pre-commit-zig
+    rev: v0.3.0
+    hooks:
+      - id: zig-fmt
+      - id: zig-build
+      - id: zig-build-test

@@ -53,3 +53,10 @@ A Zig implementation of the JSON schema validator.
 - [ ] type
 - [ ] uniqueItems
 - [ ] unknownKeyword
+
+## Pre-Commit
+
+```shell
+pip install pre-commit
+pre-commit install
+```
