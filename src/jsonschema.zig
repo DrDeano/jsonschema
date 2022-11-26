@@ -123,12 +123,99 @@ const MinMaxItems = struct {
     }
 };
 
+const MinimumMaximum = struct {
+    min: union(enum) { Int: i64, Float: f64 } = .{ .Int = 0 },
+    max: ?union(enum) { Int: i64, Float: f64 } = null,
+
+    const Self = @This();
+
+    fn toInt(self: Self) Self {
+        var range = MinimumMaximum{};
+
+        range.min = .{ .Int = switch (self.min) {
+            .Int => |val| val,
+            .Float => |val| @floatToInt(i64, val),
+        } };
+
+        if (self.max) |max| {
+            range.max = .{ .Int = switch (max) {
+                .Int => |val| val,
+                .Float => |val| @floatToInt(i64, val),
+            } };
+        }
+
+        return range;
+    }
+
+    fn toFloat(self: Self) Self {
+        var range = MinimumMaximum{};
+
+        range.min = .{ .Float = switch (self.min) {
+            .Int => |val| @intToFloat(f64, val),
+            .Float => |val| val,
+        } };
+
+        if (self.max) |max| {
+            range.max = .{ .Float = switch (max) {
+                .Int => |val| @intToFloat(f64, val),
+                .Float => |val| val,
+            } };
+        }
+
+        return range;
+    }
+
+    pub fn compile(minimum_schema: ?std.json.Value, maximum_schema: ?std.json.Value) Schema.CompileError!Self {
+        var range = MinimumMaximum{};
+        if (minimum_schema) |minimum| {
+            switch (minimum) {
+                .Integer => |ival| range.min = .{ .Int = ival },
+                .Float => |fval| range.min = .{ .Float = fval },
+                .NumberString => return error.TODONumberString,
+                else => return error.InvalidMinimumMaximumType,
+            }
+        }
+        if (maximum_schema) |maximum| {
+            switch (maximum) {
+                .Integer => |ival| range.max = .{ .Int = ival },
+                .Float => |fval| range.max = .{ .Float = fval },
+                .NumberString => return error.TODONumberString,
+                else => return error.InvalidMinimumMaximumType,
+            }
+        }
+        return range;
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        switch (data) {
+            .Integer => |val| {
+                const int_val = self.toInt();
+                var is_valid = val >= int_val.min.Int;
+                if (int_val.max) |max| {
+                    is_valid = is_valid and val <= max.Int;
+                }
+                return is_valid;
+            },
+            .Float => |val| {
+                const float_val = self.toFloat();
+                var is_valid = val >= float_val.min.Float;
+                if (float_val.max) |max| {
+                    is_valid = is_valid and val <= max.Float;
+                }
+                return is_valid;
+            },
+            else => return true,
+        }
+    }
+};
+
 /// The root compiled schema object
 pub const Schema = union(enum) {
     Schemas: []Schema,
     Bool: bool,
     Types: Types,
     MinMaxItems: MinMaxItems,
+    MinimumMaximum: MinimumMaximum,
 
     const Self = @This();
 
@@ -140,6 +227,7 @@ pub const Schema = union(enum) {
         InvalidType,
         InvalidMinMaxItemsType,
         InvalidFloatToInt,
+        InvalidMinimumMaximumType,
         NonExhaustiveSchemaValidators,
     } || Allocator.Error;
 
@@ -180,6 +268,14 @@ pub const Schema = union(enum) {
                 const max_items_schema = object.get("maxItems");
                 if (min_items_schema != null or max_items_schema != null) {
                     const sub_schema = Schema{ .MinMaxItems = try MinMaxItems.compile(min_items_schema, max_items_schema) };
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
+                }
+
+                const minimum_schema = object.get("minimum");
+                const maximum_schema = object.get("maximum");
+                if (minimum_schema != null or maximum_schema != null) {
+                    const sub_schema = Schema{ .MinimumMaximum = try MinimumMaximum.compile(minimum_schema, maximum_schema) };
                     try schema_list.append(sub_schema);
                     schema_used += 1;
                 }

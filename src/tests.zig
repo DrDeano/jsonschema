@@ -67,6 +67,8 @@ test "JSON Schema Test Suite" {
         test_files_dir ++ "type.json",
         test_files_dir ++ "maxItems.json",
         test_files_dir ++ "minItems.json",
+        test_files_dir ++ "minimum.json",
+        test_files_dir ++ "maximum.json",
     };
 
     inline for (test_files) |test_file| {
