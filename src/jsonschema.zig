@@ -140,6 +140,7 @@ pub const Schema = union(enum) {
         InvalidType,
         InvalidMinMaxItemsType,
         InvalidFloatToInt,
+        NonExhaustiveSchemaValidators,
     } || Allocator.Error;
 
     /// Error relating to the validation of JSON data against the schema
@@ -165,12 +166,14 @@ pub const Schema = union(enum) {
         return switch (schema) {
             .Bool => |b| .{ .Bool = b },
             .Object => |object| brk: {
+                var schema_used: usize = 0;
                 var schema_list = std.ArrayList(Schema).init(allocator);
                 errdefer schema_list.deinit();
 
                 if (object.get("type")) |type_schema| {
                     const sub_schema = Schema{ .Types = try Types.compile(type_schema) };
                     try schema_list.append(sub_schema);
+                    schema_used += 1;
                 }
 
                 const min_items_schema = object.get("minItems");
@@ -178,9 +181,14 @@ pub const Schema = union(enum) {
                 if (min_items_schema != null or max_items_schema != null) {
                     const sub_schema = Schema{ .MinMaxItems = try MinMaxItems.compile(min_items_schema, max_items_schema) };
                     try schema_list.append(sub_schema);
+                    schema_used += 1;
                 }
 
-                break :brk Schema{ .Schemas = schema_list.toOwnedSlice() };
+                if (object.count() != schema_used) {
+                    break :brk error.NonExhaustiveSchemaValidators;
+                }
+
+                break :brk .{ .Schemas = schema_list.toOwnedSlice() };
             },
             else => CompileError.TODOTopLevel,
         };
