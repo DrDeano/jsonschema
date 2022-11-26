@@ -36,8 +36,10 @@ pub const Schema = union(enum) {
     ///
     pub fn compile(allocator: Allocator, schema: std.json.Value) CompileError!Self {
         _ = allocator;
-        _ = schema;
-        return CompileError.TODOTopLevel;
+        return switch (schema) {
+            .Bool => |b| return Schema{ .Bool = b },
+            else => CompileError.TODOTopLevel,
+        };
     }
 
     ///
@@ -54,9 +56,10 @@ pub const Schema = union(enum) {
     ///     TODOTopLevel - TODO top level compiler
     ///
     pub fn validate(self: Self, data: std.json.Value) ValidateError!bool {
-        _ = self;
         _ = data;
-        return ValidateError.TODOTopLevel;
+        return switch (self) {
+            .Bool => |b| b,
+        };
     }
 };
 
