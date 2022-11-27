@@ -235,6 +235,16 @@ const PatternMatch = struct {
 
     pub fn compile(allocator: Allocator, properties: ?std.json.Value, pattern_properties: ?std.json.Value, additional_properties: ?std.json.Value, required: ?std.json.Value) Schema.CompileError!Self {
         var patterns = std.ArrayList(AllPattern).init(allocator);
+        errdefer {
+            for (patterns.items) |*elem| {
+                switch (elem.pattern) {
+                    .Regex => |*r| r.deinit(),
+                    else => {},
+                }
+                elem.matches.deinit(allocator);
+            }
+            patterns.deinit();
+        }
 
         var required_count: i64 = 0;
         if (required) |req| {
@@ -253,11 +263,14 @@ const PatternMatch = struct {
                 for (patterns.items) |*elem2| {
                     if (std.mem.eql(u8, elem.key_ptr.*, elem2.pattern.All.pattern)) {
                         elem2.matches = try Schema.compile(allocator, elem.value_ptr.*);
+                        errdefer elem2.matches.deinit(allocator);
                     }
                 } else {
+                    const match = try Schema.compile(allocator, elem.value_ptr.*);
+                    errdefer match.deinit(allocator);
                     try patterns.append(.{
                         .pattern = .{ .All = .{ .pattern = elem.key_ptr.*, .required = false } },
-                        .matches = try Schema.compile(allocator, elem.value_ptr.*),
+                        .matches = match,
                     });
                 }
             }
@@ -266,9 +279,13 @@ const PatternMatch = struct {
         if (pattern_properties) |prop| {
             var prop_it = prop.Object.iterator();
             while (prop_it.next()) |elem| {
+                const match = try Schema.compile(allocator, elem.value_ptr.*);
+                errdefer match.deinit(allocator);
+                var reg = try regex.Regex.compile(allocator, elem.key_ptr.*);
+                errdefer reg.deinit();
                 try patterns.append(.{
-                    .pattern = .{ .Regex = try regex.Regex.compile(allocator, elem.key_ptr.*) },
-                    .matches = try Schema.compile(allocator, elem.value_ptr.*),
+                    .pattern = .{ .Regex = reg },
+                    .matches = match,
                 });
             }
         }
@@ -276,6 +293,7 @@ const PatternMatch = struct {
         var not_matches: ?*Schema = null;
         if (additional_properties) |add_prop| {
             not_matches = try allocator.create(Schema);
+            errdefer allocator.destroy(not_matches.?);
             not_matches.?.* = try Schema.compile(allocator, add_prop);
         }
 
@@ -390,6 +408,7 @@ pub const Schema = union(enum) {
 
                 if (object.get("type")) |type_schema| {
                     const sub_schema = Schema{ .Types = try Types.compile(type_schema) };
+                    errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     schema_used += 1;
                 }
@@ -398,6 +417,7 @@ pub const Schema = union(enum) {
                 const max_items_schema = object.get("maxItems");
                 if (min_items_schema != null or max_items_schema != null) {
                     const sub_schema = Schema{ .MinMaxItems = try MinMaxItems.compile(min_items_schema, max_items_schema) };
+                    errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     if (min_items_schema) |_| {
                         schema_used += 1;
@@ -411,6 +431,7 @@ pub const Schema = union(enum) {
                 const maximum_schema = object.get("maximum");
                 if (minimum_schema != null or maximum_schema != null) {
                     const sub_schema = Schema{ .MinimumMaximum = try MinimumMaximum.compile(minimum_schema, maximum_schema) };
+                    errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     if (minimum_schema) |_| {
                         schema_used += 1;
@@ -426,6 +447,7 @@ pub const Schema = union(enum) {
                 const required = object.get("required");
                 if (properties != null or pattern_properties != null or pattern_properties != null or additional_properties != null or required != null) {
                     const sub_schema = Schema{ .PatternMatch = try PatternMatch.compile(allocator, properties, pattern_properties, additional_properties, required) };
+                    errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     if (properties) |_| {
                         schema_used += 1;
