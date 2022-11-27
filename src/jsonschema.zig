@@ -3,6 +3,8 @@ const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
+const regex = @import("zig-regex");
+
 const Type = enum {
     Object,
     Array,
@@ -209,6 +211,133 @@ const MinimumMaximum = struct {
     }
 };
 
+const Pattern = struct {
+    pattern: []const u8,
+    required: bool,
+};
+
+const AllPattern = struct {
+    pattern: union(enum) {
+        All: Pattern,
+        Regex: regex.Regex,
+    },
+    matches: Schema,
+};
+
+const PatternMatch = struct {
+    pattern: std.ArrayList(AllPattern),
+    // Would prefer ?Schema but complier broken
+    // For now this is a pointer and will need to be freed
+    not_matches: ?*Schema,
+    required_count: i64,
+
+    const Self = @This();
+
+    pub fn compile(allocator: Allocator, properties: ?std.json.Value, pattern_properties: ?std.json.Value, additional_properties: ?std.json.Value, required: ?std.json.Value) Schema.CompileError!Self {
+        var patterns = std.ArrayList(AllPattern).init(allocator);
+
+        var required_count: i64 = 0;
+        if (required) |req| {
+            for (req.Array.items) |elem| {
+                try patterns.append(.{
+                    .pattern = .{ .All = .{ .pattern = elem.String, .required = true } },
+                    .matches = Schema{ .Bool = true },
+                });
+            }
+            required_count = @intCast(i64, req.Array.items.len);
+        }
+
+        if (properties) |prop| {
+            var prop_it = prop.Object.iterator();
+            while (prop_it.next()) |elem| {
+                for (patterns.items) |*elem2| {
+                    if (std.mem.eql(u8, elem.key_ptr.*, elem2.pattern.All.pattern)) {
+                        elem2.matches = try Schema.compile(allocator, elem.value_ptr.*);
+                    }
+                } else {
+                    try patterns.append(.{
+                        .pattern = .{ .All = .{ .pattern = elem.key_ptr.*, .required = false } },
+                        .matches = try Schema.compile(allocator, elem.value_ptr.*),
+                    });
+                }
+            }
+        }
+
+        if (pattern_properties) |prop| {
+            var prop_it = prop.Object.iterator();
+            while (prop_it.next()) |elem| {
+                try patterns.append(.{
+                    .pattern = .{ .Regex = try regex.Regex.compile(allocator, elem.key_ptr.*) },
+                    .matches = try Schema.compile(allocator, elem.value_ptr.*),
+                });
+            }
+        }
+
+        var not_matches: ?*Schema = null;
+        if (additional_properties) |add_prop| {
+            not_matches = try allocator.create(Schema);
+            not_matches.?.* = try Schema.compile(allocator, add_prop);
+        }
+
+        return .{
+            .pattern = patterns,
+            .not_matches = not_matches,
+            .required_count = required_count,
+        };
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        switch (data) {
+            .Object => |obj| {
+                var required_matches: usize = 0;
+                var obj_it = obj.iterator();
+                while (obj_it.next()) |obj_val| {
+                    var failed_match = false;
+                    var has_match = false;
+                    for (self.pattern.items) |*pattern| {
+                        switch (pattern.pattern) {
+                            .All => |pat| {
+                                if (std.mem.eql(u8, pat.pattern, obj_val.key_ptr.*)) {
+                                    has_match = true;
+                                    if (pat.required) {
+                                        required_matches += 1;
+                                    }
+                                    if (!try pattern.matches.validate(obj_val.value_ptr.*)) {
+                                        failed_match = true;
+                                        break;
+                                    }
+                                }
+                            },
+                            .Regex => |*re| {
+                                if (try re.partialMatch(obj_val.key_ptr.*)) {
+                                    has_match = true;
+                                    if (!try pattern.matches.validate(obj_val.value_ptr.*)) {
+                                        failed_match = true;
+                                        break;
+                                    }
+                                }
+                            },
+                        }
+                    }
+                    if (!has_match or failed_match) {
+                        if (self.not_matches) |not_matches| {
+                            if (!try not_matches.validate(obj_val.value_ptr.*)) {
+                                return false;
+                            }
+                        }
+                        // Move this above the first if (test speed)
+                        if (failed_match) {
+                            return false;
+                        }
+                    }
+                }
+                return self.required_count <= required_matches;
+            },
+            else => return true,
+        }
+    }
+};
+
 /// The root compiled schema object
 pub const Schema = union(enum) {
     Schemas: []Schema,
@@ -216,6 +345,7 @@ pub const Schema = union(enum) {
     Types: Types,
     MinMaxItems: MinMaxItems,
     MinimumMaximum: MinimumMaximum,
+    PatternMatch: PatternMatch,
 
     const Self = @This();
 
@@ -229,13 +359,13 @@ pub const Schema = union(enum) {
         InvalidFloatToInt,
         InvalidMinimumMaximumType,
         NonExhaustiveSchemaValidators,
-    } || Allocator.Error;
+    } || Allocator.Error || @typeInfo(@typeInfo(@TypeOf(regex.Regex.compile)).Fn.return_type.?).ErrorUnion.error_set;
 
     /// Error relating to the validation of JSON data against the schema
     pub const ValidateError = error{
         /// TODO top level compiler
         TODOTopLevel,
-    };
+    } || @typeInfo(@typeInfo(@TypeOf(regex.Regex.partialMatch)).Fn.return_type.?).ErrorUnion.error_set;
 
     ///
     /// Compile the provided JSON schema into a more refined form for faster validation.
@@ -269,7 +399,12 @@ pub const Schema = union(enum) {
                 if (min_items_schema != null or max_items_schema != null) {
                     const sub_schema = Schema{ .MinMaxItems = try MinMaxItems.compile(min_items_schema, max_items_schema) };
                     try schema_list.append(sub_schema);
-                    schema_used += 1;
+                    if (min_items_schema) |_| {
+                        schema_used += 1;
+                    }
+                    if (max_items_schema) |_| {
+                        schema_used += 1;
+                    }
                 }
 
                 const minimum_schema = object.get("minimum");
@@ -277,7 +412,33 @@ pub const Schema = union(enum) {
                 if (minimum_schema != null or maximum_schema != null) {
                     const sub_schema = Schema{ .MinimumMaximum = try MinimumMaximum.compile(minimum_schema, maximum_schema) };
                     try schema_list.append(sub_schema);
-                    schema_used += 1;
+                    if (minimum_schema) |_| {
+                        schema_used += 1;
+                    }
+                    if (maximum_schema) |_| {
+                        schema_used += 1;
+                    }
+                }
+
+                const properties = object.get("properties");
+                const pattern_properties = object.get("patternProperties");
+                const additional_properties = object.get("additionalProperties");
+                const required = object.get("required");
+                if (properties != null or pattern_properties != null or pattern_properties != null or additional_properties != null or required != null) {
+                    const sub_schema = Schema{ .PatternMatch = try PatternMatch.compile(allocator, properties, pattern_properties, additional_properties, required) };
+                    try schema_list.append(sub_schema);
+                    if (properties) |_| {
+                        schema_used += 1;
+                    }
+                    if (pattern_properties) |_| {
+                        schema_used += 1;
+                    }
+                    if (additional_properties) |_| {
+                        schema_used += 1;
+                    }
+                    if (required) |_| {
+                        schema_used += 1;
+                    }
                 }
 
                 if (object.count() != schema_used) {
@@ -290,9 +451,35 @@ pub const Schema = union(enum) {
         };
     }
 
+    ///
+    /// Deinitialise the compiled schema.
+    ///
+    /// Arguments:
+    ///     IN self: Self - The compiled schema.
+    ///     IN allocator: Allocator - The allocator used in Schema.compile()
+    ///
     pub fn deinit(self: Self, allocator: Allocator) void {
         switch (self) {
-            .Schemas => |schemas| allocator.free(schemas),
+            .Schemas => |schemas| {
+                for (schemas) |elem| {
+                    elem.deinit(allocator);
+                }
+                allocator.free(schemas);
+            },
+            .PatternMatch => |pattern_match| {
+                for (pattern_match.pattern.items) |*pattern| {
+                    switch (pattern.pattern) {
+                        .Regex => |*reg| reg.deinit(),
+                        else => {},
+                    }
+                    pattern.matches.deinit(allocator);
+                }
+                pattern_match.pattern.deinit();
+                if (pattern_match.not_matches) |not_matches| {
+                    not_matches.*.deinit(allocator);
+                    allocator.destroy(not_matches);
+                }
+            },
             else => {},
         }
     }

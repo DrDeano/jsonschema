@@ -61,14 +61,17 @@ test "c API" {
 }
 
 test "JSON Schema Test Suite" {
-    const test_files_dir = "JSON-Schema-Test-Suite/tests/draft7/";
+    const test_files_dir = "libs/JSON-Schema-Test-Suite/tests/draft7/";
     const test_files = .{
         test_files_dir ++ "boolean_schema.json",
-        test_files_dir ++ "type.json",
-        test_files_dir ++ "maxItems.json",
-        test_files_dir ++ "minItems.json",
-        test_files_dir ++ "minimum.json",
         test_files_dir ++ "maximum.json",
+        test_files_dir ++ "maxItems.json",
+        test_files_dir ++ "minimum.json",
+        test_files_dir ++ "minItems.json",
+        test_files_dir ++ "patternProperties.json",
+        test_files_dir ++ "properties.json",
+        test_files_dir ++ "required.json",
+        test_files_dir ++ "type.json",
     };
 
     inline for (test_files) |test_file| {

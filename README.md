@@ -14,7 +14,7 @@ A Zig implementation of the JSON schema validator.
 
 ## Supported Validations (Draft 7)
 
-- [ ] additionalProperties
+- [x] additionalProperties
 - [ ] allOf
 - [ ] anyOf
 - [x] boolean_schema
@@ -44,12 +44,12 @@ A Zig implementation of the JSON schema validator.
 - [ ] oneOf
 - [ ] opt
 - [ ] pattern
-- [ ] patternProperties
-- [ ] properties
+- [x] patternProperties
+- [x] properties
 - [ ] propertyNames
 - [ ] ref
 - [ ] refRemote
-- [ ] required
+- [x] required
 - [x] type
 - [ ] uniqueItems
 - [ ] unknownKeyword
