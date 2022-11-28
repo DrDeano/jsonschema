@@ -65,7 +65,7 @@ const Types = struct {
             .String => self.types.contains(.String),
             .Integer => self.types.contains(.Integer) or self.types.contains(.Number),
             .Float => |val| self.types.contains(.Number) or (self.types.contains(.Integer) and (@floor(val) == val and @ceil(val) == val)),
-            .NumberString => error.TODOTopLevel,
+            .NumberString => error.TODONumberString,
             .Bool => self.types.contains(.Bool),
             .Null => self.types.contains(.Null),
         };
@@ -206,6 +206,7 @@ const MinimumMaximum = struct {
                 }
                 return is_valid;
             },
+            .NumberString => return error.TODONumberString,
             else => return true,
         }
     }
@@ -356,6 +357,82 @@ const PatternMatch = struct {
     }
 };
 
+const MultipleOf = struct {
+    multiple: union(enum) { Int: i64, Float: f64 },
+
+    const Self = @This();
+
+    pub fn compile(multiple_of_schema: std.json.Value) Schema.CompileError!Self {
+        switch (multiple_of_schema) {
+            .Integer => |ival| {
+                if (ival <= 0) {
+                    return error.MultipleOfLessThanZero;
+                }
+                return .{ .multiple = .{ .Int = ival } };
+            },
+            .Float => |fval| {
+                if (fval <= 0) {
+                    return error.MultipleOfLessThanZero;
+                }
+                return .{ .multiple = .{ .Float = fval } };
+            },
+            .NumberString => return error.TODONumberString,
+            else => return error.InvalidMultipleOfType,
+        }
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        switch (data) {
+            .Integer => |ival| {
+                switch (self.multiple) {
+                    .Int => |m_ival| {
+                        _ = std.math.divExact(i64, ival, m_ival) catch |e| switch (e) {
+                            error.UnexpectedRemainder => return false,
+                            else => return e,
+                        };
+                        return true;
+                    },
+                    .Float => |m_fval| {
+                        const fval = @intToFloat(f64, ival);
+                        _ = std.math.divExact(f64, fval, m_fval) catch |e| switch (e) {
+                            error.UnexpectedRemainder => {
+                                const test_result = @divTrunc(fval, m_fval) * m_fval;
+                                return std.math.approxEqAbs(f64, test_result, fval, std.math.floatEps(f64));
+                            },
+                            else => return e,
+                        };
+                        return true;
+                    },
+                }
+            },
+            .Float => |fval| {
+                switch (self.multiple) {
+                    .Int => |m_ival| {
+                        const m_fval = @intToFloat(f64, m_ival);
+                        _ = std.math.divExact(f64, fval, m_fval) catch |e| switch (e) {
+                            error.UnexpectedRemainder => return false,
+                            else => return e,
+                        };
+                        return true;
+                    },
+                    .Float => |m_fval| {
+                        _ = std.math.divExact(f64, fval, m_fval) catch |e| switch (e) {
+                            error.UnexpectedRemainder => {
+                                const test_result = @divTrunc(fval, m_fval) * m_fval;
+                                return std.math.approxEqAbs(f64, test_result, fval, std.math.floatEps(f64));
+                            },
+                            else => return e,
+                        };
+                        return true;
+                    },
+                }
+            },
+            .NumberString => return error.TODONumberString,
+            else => return true,
+        }
+    }
+};
+
 /// The root compiled schema object
 pub const Schema = union(enum) {
     Schemas: []Schema,
@@ -364,26 +441,35 @@ pub const Schema = union(enum) {
     MinMaxItems: MinMaxItems,
     MinimumMaximum: MinimumMaximum,
     PatternMatch: PatternMatch,
+    MultipleOf: MultipleOf,
 
     const Self = @This();
 
-    /// Error relating to the compilation of the schema
-    pub const CompileError = error{
+    const TODOError = error{
         /// TODO top level compiler
         TODOTopLevel,
         TODONumberString,
+    };
+
+    /// Error relating to the compilation of the schema
+    pub const CompileError = error{
         InvalidType,
         InvalidMinMaxItemsType,
         InvalidFloatToInt,
         InvalidMinimumMaximumType,
+        InvalidMultipleOfType,
+        MultipleOfLessThanZero,
         NonExhaustiveSchemaValidators,
-    } || Allocator.Error || @typeInfo(@typeInfo(@TypeOf(regex.Regex.compile)).Fn.return_type.?).ErrorUnion.error_set;
+    } ||
+        TODOError ||
+        Allocator.Error ||
+        @typeInfo(@typeInfo(@TypeOf(regex.Regex.compile)).Fn.return_type.?).ErrorUnion.error_set;
 
     /// Error relating to the validation of JSON data against the schema
-    pub const ValidateError = error{
-        /// TODO top level compiler
-        TODOTopLevel,
-    } || @typeInfo(@typeInfo(@TypeOf(regex.Regex.partialMatch)).Fn.return_type.?).ErrorUnion.error_set;
+    pub const ValidateError =
+        TODOError ||
+        @typeInfo(@typeInfo(@TypeOf(regex.Regex.partialMatch)).Fn.return_type.?).ErrorUnion.error_set ||
+        @typeInfo(@TypeOf(std.math.divExact(i64, 1, 1))).ErrorUnion.error_set;
 
     ///
     /// Compile the provided JSON schema into a more refined form for faster validation.
@@ -461,6 +547,13 @@ pub const Schema = union(enum) {
                     if (required) |_| {
                         schema_used += 1;
                     }
+                }
+
+                if (object.get("multipleOf")) |multiple_of_schema| {
+                    const sub_schema = Schema{ .MultipleOf = try MultipleOf.compile(multiple_of_schema) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
                 }
 
                 if (object.count() != schema_used) {
