@@ -227,7 +227,8 @@ const AllPattern = struct {
 
 const PatternMatch = struct {
     pattern: std.ArrayList(AllPattern),
-    // Would prefer ?Schema but complier broken
+    // Would prefer ?Schema but complier doesn't yes support self dependency:
+    // https://github.com/ziglang/zig/issues/2746
     // For now this is a pointer and will need to be freed
     not_matches: ?*Schema,
     required_count: i64,
@@ -433,6 +434,79 @@ const MultipleOf = struct {
     }
 };
 
+const AllAnyOneOf = struct {
+    // Would prefer Schema but complier doesn't yes support self dependency:
+    // https://github.com/ziglang/zig/issues/2746
+    // For now this is a pointer and will need to be freed
+    schemas: []Schema,
+    type_of: TypeOf,
+
+    const Self = @This();
+    const TypeOf = enum {
+        All,
+        Any,
+        One,
+    };
+
+    pub fn compile(allocator: Allocator, all_of_schema: std.json.Value, type_of: TypeOf) Schema.CompileError!Self {
+        switch (all_of_schema) {
+            .Array => |array| {
+                if (array.items.len == 0) {
+                    return error.AllOfEmptyArray;
+                }
+                var schemas = std.ArrayList(Schema).init(allocator);
+                errdefer {
+                    for (schemas.items) |sub_schema| {
+                        sub_schema.deinit(allocator);
+                    }
+                    schemas.deinit();
+                }
+                for (array.items) |sub_schema| {
+                    const comp_sub_schema = try Schema.compile(allocator, sub_schema);
+                    errdefer comp_sub_schema.deinit(allocator);
+                    try schemas.append(comp_sub_schema);
+                }
+                return .{ .schemas = schemas.toOwnedSlice(), .type_of = type_of };
+            },
+            else => return error.InvalidAllOfType,
+        }
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        switch (self.type_of) {
+            .All => {
+                for (self.schemas) |sub_schema| {
+                    if (!try sub_schema.validate(data)) {
+                        return false;
+                    }
+                }
+                return true;
+            },
+            .Any => {
+                for (self.schemas) |sub_schema| {
+                    if (try sub_schema.validate(data)) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            .One => {
+                var has_valid = false;
+                for (self.schemas) |sub_schema| {
+                    const is_valid = try sub_schema.validate(data);
+                    if (has_valid and is_valid) {
+                        return false;
+                    }
+                    if (!has_valid) {
+                        has_valid = is_valid;
+                    }
+                }
+                return has_valid;
+            },
+        }
+    }
+};
+
 /// The root compiled schema object
 pub const Schema = union(enum) {
     Schemas: []Schema,
@@ -442,6 +516,9 @@ pub const Schema = union(enum) {
     MinimumMaximum: MinimumMaximum,
     PatternMatch: PatternMatch,
     MultipleOf: MultipleOf,
+    AllOf: AllAnyOneOf,
+    AnyOf: AllAnyOneOf,
+    OneOf: AllAnyOneOf,
 
     const Self = @This();
 
@@ -459,6 +536,8 @@ pub const Schema = union(enum) {
         InvalidMinimumMaximumType,
         InvalidMultipleOfType,
         MultipleOfLessThanZero,
+        AllOfEmptyArray,
+        InvalidAllOfType,
         NonExhaustiveSchemaValidators,
     } ||
         TODOError ||
@@ -490,7 +569,12 @@ pub const Schema = union(enum) {
             .Object => |object| brk: {
                 var schema_used: usize = 0;
                 var schema_list = std.ArrayList(Schema).init(allocator);
-                errdefer schema_list.deinit();
+                errdefer {
+                    for (schema_list.items) |sub_schema| {
+                        sub_schema.deinit(allocator);
+                    }
+                    schema_list.deinit();
+                }
 
                 if (object.get("type")) |type_schema| {
                     const sub_schema = Schema{ .Types = try Types.compile(type_schema) };
@@ -556,8 +640,29 @@ pub const Schema = union(enum) {
                     schema_used += 1;
                 }
 
+                if (object.get("allOf")) |all_of_schema| {
+                    const sub_schema = Schema{ .AllOf = try AllAnyOneOf.compile(allocator, all_of_schema, .All) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
+                }
+
+                if (object.get("anyOf")) |all_of_schema| {
+                    const sub_schema = Schema{ .AnyOf = try AllAnyOneOf.compile(allocator, all_of_schema, .Any) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
+                }
+
+                if (object.get("oneOf")) |all_of_schema| {
+                    const sub_schema = Schema{ .OneOf = try AllAnyOneOf.compile(allocator, all_of_schema, .One) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
+                }
+
                 if (object.count() != schema_used) {
-                    break :brk error.NonExhaustiveSchemaValidators;
+                    return error.NonExhaustiveSchemaValidators;
                 }
 
                 break :brk .{ .Schemas = schema_list.toOwnedSlice() };
@@ -594,6 +699,12 @@ pub const Schema = union(enum) {
                     not_matches.*.deinit(allocator);
                     allocator.destroy(not_matches);
                 }
+            },
+            .AllOf, .AnyOf, .OneOf => |all_of| {
+                for (all_of.schemas) |schemas| {
+                    schemas.deinit(allocator);
+                }
+                allocator.free(all_of.schemas);
             },
             else => {},
         }

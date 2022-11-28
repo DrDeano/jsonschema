@@ -15,8 +15,8 @@ A Zig implementation of the JSON schema validator.
 ## Supported Validations (Draft 7)
 
 - [x] additionalProperties
-- [ ] allOf
-- [ ] anyOf
+- [x] allOf
+- [x] anyOf
 - [x] boolean_schema
 - [ ] const
 - [ ] contains
@@ -41,7 +41,7 @@ A Zig implementation of the JSON schema validator.
 - [ ] minProperties
 - [x] multipleOf
 - [ ] not
-- [ ] oneOf
+- [x] oneOf
 - [ ] opt
 - [ ] pattern
 - [x] patternProperties

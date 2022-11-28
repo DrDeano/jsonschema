@@ -63,6 +63,8 @@ test "c API" {
 test "JSON Schema Test Suite" {
     const test_files_dir = "libs/JSON-Schema-Test-Suite/tests/draft7/";
     const test_files = .{
+        test_files_dir ++ "additionalProperties.json",
+        test_files_dir ++ "allOf.json",
         test_files_dir ++ "boolean_schema.json",
         test_files_dir ++ "maximum.json",
         test_files_dir ++ "maxItems.json",
