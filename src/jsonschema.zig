@@ -72,14 +72,19 @@ const Types = struct {
     }
 };
 
-const MinMaxItems = struct {
+const MinMax = struct {
     min: i64 = 0,
     max: ?i64 = null,
+    type_of: TypeOf,
 
     const Self = @This();
+    const TypeOf = enum {
+        Items,
+        Length,
+    };
 
-    pub fn compile(min_items_schema: ?std.json.Value, max_items_schema: ?std.json.Value) Schema.CompileError!Self {
-        var range = MinMaxItems{};
+    pub fn compile(min_items_schema: ?std.json.Value, max_items_schema: ?std.json.Value, type_of: TypeOf) Schema.CompileError!Self {
+        var range = MinMax{ .type_of = type_of };
         if (min_items_schema) |min_items| {
             switch (min_items) {
                 .Integer => |ival| range.min = ival,
@@ -114,11 +119,25 @@ const MinMaxItems = struct {
     pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
         switch (data) {
             .Array => |array| {
-                var is_valid = array.items.len >= self.min;
-                if (self.max) |max| {
-                    is_valid = is_valid and array.items.len <= max;
+                if (self.type_of == .Items) {
+                    var is_valid = array.items.len >= self.min;
+                    if (self.max) |max| {
+                        is_valid = is_valid and array.items.len <= max;
+                    }
+                    return is_valid;
                 }
-                return is_valid;
+                return true;
+            },
+            .String => |string| {
+                const uni_len = try std.unicode.utf8CountCodepoints(string);
+                if (self.type_of == .Length) {
+                    var is_valid = uni_len >= self.min;
+                    if (self.max) |max| {
+                        is_valid = is_valid and uni_len <= max;
+                    }
+                    return is_valid;
+                }
+                return true;
             },
             else => return true,
         }
@@ -512,13 +531,14 @@ pub const Schema = union(enum) {
     Schemas: []Schema,
     Bool: bool,
     Types: Types,
-    MinMaxItems: MinMaxItems,
+    MinMaxItems: MinMax,
     MinimumMaximum: MinimumMaximum,
     PatternMatch: PatternMatch,
     MultipleOf: MultipleOf,
     AllOf: AllAnyOneOf,
     AnyOf: AllAnyOneOf,
     OneOf: AllAnyOneOf,
+    MinMaxLength: MinMax,
 
     const Self = @This();
 
@@ -548,7 +568,8 @@ pub const Schema = union(enum) {
     pub const ValidateError =
         TODOError ||
         @typeInfo(@typeInfo(@TypeOf(regex.Regex.partialMatch)).Fn.return_type.?).ErrorUnion.error_set ||
-        @typeInfo(@TypeOf(std.math.divExact(i64, 1, 1))).ErrorUnion.error_set;
+        @typeInfo(@TypeOf(std.math.divExact(i64, 1, 1))).ErrorUnion.error_set ||
+        @typeInfo(@typeInfo(@TypeOf(std.unicode.utf8CountCodepoints)).Fn.return_type.?).ErrorUnion.error_set;
 
     ///
     /// Compile the provided JSON schema into a more refined form for faster validation.
@@ -586,7 +607,7 @@ pub const Schema = union(enum) {
                 const min_items_schema = object.get("minItems");
                 const max_items_schema = object.get("maxItems");
                 if (min_items_schema != null or max_items_schema != null) {
-                    const sub_schema = Schema{ .MinMaxItems = try MinMaxItems.compile(min_items_schema, max_items_schema) };
+                    const sub_schema = Schema{ .MinMaxItems = try MinMax.compile(min_items_schema, max_items_schema, .Items) };
                     errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     if (min_items_schema) |_| {
@@ -659,6 +680,20 @@ pub const Schema = union(enum) {
                     errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     schema_used += 1;
+                }
+
+                const min_length_schema = object.get("minLength");
+                const max_length_schema = object.get("maxLength");
+                if (min_length_schema != null or max_length_schema != null) {
+                    const sub_schema = Schema{ .MinMaxLength = try MinMax.compile(min_length_schema, max_length_schema, .Length) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    if (min_length_schema) |_| {
+                        schema_used += 1;
+                    }
+                    if (max_length_schema) |_| {
+                        schema_used += 1;
+                    }
                 }
 
                 if (object.count() != schema_used) {

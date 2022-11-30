@@ -33,11 +33,11 @@ A Zig implementation of the JSON schema validator.
 - [ ] items
 - [x] maximum
 - [x] maxItems
-- [ ] maxLength
+- [x] maxLength
 - [ ] maxProperties
 - [x] minimum
 - [x] minItems
-- [ ] minLength
+- [x] minLength
 - [ ] minProperties
 - [x] multipleOf
 - [ ] not
