@@ -5,22 +5,22 @@ const Allocator = std.mem.Allocator;
 
 const regex = @import("zig-regex");
 
-const Type = enum {
-    Object,
-    Array,
-    String,
-    Number,
-    Integer,
-    Bool,
-    Null,
-};
-
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-type
 const Types = struct {
     // This is a enum set as a number can be an int or float
     // and a int can be either a int or a float if the float can be represented as a int without rounding
     types: std.EnumSet(Type) = std.EnumSet(Type){},
 
     const Self = @This();
+    const Type = enum {
+        Object,
+        Array,
+        String,
+        Number,
+        Integer,
+        Bool,
+        Null,
+    };
 
     fn str_to_schema_enum(str: []const u8) Schema.CompileError!std.EnumSet(Type) {
         var set = std.EnumSet(Type){};
@@ -72,6 +72,10 @@ const Types = struct {
     }
 };
 
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-maxlength
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-minlength
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-maxitems
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-minitems
 const MinMax = struct {
     min: i64 = 0,
     max: ?i64 = null,
@@ -144,6 +148,8 @@ const MinMax = struct {
     }
 };
 
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-maximum
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-minimum
 const MinimumMaximum = struct {
     min: union(enum) { Int: i64, Float: f64 } = .{ .Int = 0 },
     max: ?union(enum) { Int: i64, Float: f64 } = null,
@@ -244,6 +250,10 @@ const AllPattern = struct {
     matches: Schema,
 };
 
+// https://json-schema.org/draft/2020-12/json-schema-core.html#name-properties
+// https://json-schema.org/draft/2020-12/json-schema-core.html#name-patternproperties
+// https://json-schema.org/draft/2020-12/json-schema-core.html#name-additionalproperties
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-required
 const PatternMatch = struct {
     pattern: std.ArrayList(AllPattern),
     // Would prefer ?Schema but complier doesn't yes support self dependency:
@@ -377,6 +387,7 @@ const PatternMatch = struct {
     }
 };
 
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-multipleof
 const MultipleOf = struct {
     multiple: union(enum) { Int: i64, Float: f64 },
 
@@ -453,6 +464,9 @@ const MultipleOf = struct {
     }
 };
 
+// https://json-schema.org/draft/2020-12/json-schema-core.html#name-allof
+// https://json-schema.org/draft/2020-12/json-schema-core.html#name-anyof
+// https://json-schema.org/draft/2020-12/json-schema-core.html#name-oneof
 const AllAnyOneOf = struct {
     // Would prefer Schema but complier doesn't yes support self dependency:
     // https://github.com/ziglang/zig/issues/2746
@@ -586,6 +600,7 @@ pub const Schema = union(enum) {
     ///
     pub fn compile(allocator: Allocator, schema: std.json.Value) CompileError!Self {
         return switch (schema) {
+            // https://json-schema.org/draft/2020-12/json-schema-core.html#name-boolean-json-schemas
             .Bool => |b| .{ .Bool = b },
             .Object => |object| brk: {
                 var schema_used: usize = 0;
