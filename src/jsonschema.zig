@@ -150,14 +150,17 @@ const MinMax = struct {
 
 // https://json-schema.org/draft/2020-12/json-schema-validation.html#name-maximum
 // https://json-schema.org/draft/2020-12/json-schema-validation.html#name-minimum
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-exclusivemaximum
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-exclusiveminimum
 const MinimumMaximum = struct {
     min: union(enum) { Int: i64, Float: f64 } = .{ .Int = 0 },
     max: ?union(enum) { Int: i64, Float: f64 } = null,
+    is_exclusive: bool,
 
     const Self = @This();
 
     fn toInt(self: Self) Self {
-        var range = MinimumMaximum{};
+        var range = MinimumMaximum{ .is_exclusive = self.is_exclusive };
 
         range.min = .{ .Int = switch (self.min) {
             .Int => |val| val,
@@ -175,7 +178,7 @@ const MinimumMaximum = struct {
     }
 
     fn toFloat(self: Self) Self {
-        var range = MinimumMaximum{};
+        var range = MinimumMaximum{ .is_exclusive = self.is_exclusive };
 
         range.min = .{ .Float = switch (self.min) {
             .Int => |val| @intToFloat(f64, val),
@@ -192,8 +195,8 @@ const MinimumMaximum = struct {
         return range;
     }
 
-    pub fn compile(minimum_schema: ?std.json.Value, maximum_schema: ?std.json.Value) Schema.CompileError!Self {
-        var range = MinimumMaximum{};
+    pub fn compile(minimum_schema: ?std.json.Value, maximum_schema: ?std.json.Value, is_exclusive: bool) Schema.CompileError!Self {
+        var range = MinimumMaximum{ .is_exclusive = is_exclusive };
         if (minimum_schema) |minimum| {
             switch (minimum) {
                 .Integer => |ival| range.min = .{ .Int = ival },
@@ -213,7 +216,7 @@ const MinimumMaximum = struct {
         return range;
     }
 
-    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+    fn validate_inclusive(self: Self, data: std.json.Value) Schema.ValidateError!bool {
         switch (data) {
             .Integer => |val| {
                 const int_val = self.toInt();
@@ -234,6 +237,36 @@ const MinimumMaximum = struct {
             .NumberString => return error.TODONumberString,
             else => return true,
         }
+    }
+
+    fn validate_exclusive(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        switch (data) {
+            .Integer => |val| {
+                const int_val = self.toInt();
+                var is_valid = val > int_val.min.Int;
+                if (int_val.max) |max| {
+                    is_valid = is_valid and val < max.Int;
+                }
+                return is_valid;
+            },
+            .Float => |val| {
+                const float_val = self.toFloat();
+                var is_valid = val > float_val.min.Float;
+                if (float_val.max) |max| {
+                    is_valid = is_valid and val < max.Float;
+                }
+                return is_valid;
+            },
+            .NumberString => return error.TODONumberString,
+            else => return true,
+        }
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        if (self.is_exclusive) {
+            return self.validate_exclusive(data);
+        }
+        return self.validate_inclusive(data);
     }
 };
 
@@ -553,6 +586,7 @@ pub const Schema = union(enum) {
     AnyOf: AllAnyOneOf,
     OneOf: AllAnyOneOf,
     MinMaxLength: MinMax,
+    MinimumMaximumExclusive: MinimumMaximum,
 
     const Self = @This();
 
@@ -636,13 +670,27 @@ pub const Schema = union(enum) {
                 const minimum_schema = object.get("minimum");
                 const maximum_schema = object.get("maximum");
                 if (minimum_schema != null or maximum_schema != null) {
-                    const sub_schema = Schema{ .MinimumMaximum = try MinimumMaximum.compile(minimum_schema, maximum_schema) };
+                    const sub_schema = Schema{ .MinimumMaximum = try MinimumMaximum.compile(minimum_schema, maximum_schema, false) };
                     errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     if (minimum_schema) |_| {
                         schema_used += 1;
                     }
                     if (maximum_schema) |_| {
+                        schema_used += 1;
+                    }
+                }
+
+                const minimum_exclusive_schema = object.get("exclusiveMinimum");
+                const maximum_exclusive_schema = object.get("exclusiveMaximum");
+                if (minimum_exclusive_schema != null or maximum_exclusive_schema != null) {
+                    const sub_schema = Schema{ .MinimumMaximumExclusive = try MinimumMaximum.compile(minimum_exclusive_schema, maximum_exclusive_schema, true) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    if (minimum_exclusive_schema) |_| {
+                        schema_used += 1;
+                    }
+                    if (maximum_exclusive_schema) |_| {
                         schema_used += 1;
                     }
                 }

@@ -24,8 +24,8 @@ A Zig implementation of the JSON schema validator.
 - [ ] definitions
 - [ ] dependencies
 - [ ] enum
-- [ ] exclusiveMaximum
-- [ ] exclusiveMinimum
+- [x] exclusiveMaximum
+- [x] exclusiveMinimum
 - [ ] format
 - [ ] id
 - [ ] if-then-else

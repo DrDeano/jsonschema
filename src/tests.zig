@@ -67,6 +67,8 @@ test "JSON Schema Test Suite" {
         test_files_dir ++ "allOf.json",
         test_files_dir ++ "anyOf.json",
         test_files_dir ++ "boolean_schema.json",
+        test_files_dir ++ "exclusiveMaximum.json",
+        test_files_dir ++ "exclusiveMinimum.json",
         test_files_dir ++ "maximum.json",
         test_files_dir ++ "maxItems.json",
         test_files_dir ++ "maxLength.json",
@@ -99,16 +101,18 @@ test "JSON Schema Test Suite" {
             const test_obj = entry.Object;
             const schema = test_obj.get("schema").?;
             const tests = test_obj.get("tests").?;
+            const schema_description = test_obj.get("description").?.String;
             for (tests.Array.items) |sub_entry| {
                 const sub_test_obj = sub_entry.Object;
                 const test_data = sub_test_obj.get("data").?;
                 const is_valid = sub_test_obj.get("valid").?.Bool;
+                const test_description = sub_test_obj.get("description").?.String;
                 var compiled_schema = jsonschema.Schema.compile(std.testing.allocator, schema) catch |e| {
                     var schema_buff: [1024]u8 = undefined;
                     var schema_stream = std.io.fixedBufferStream(&schema_buff);
 
                     try schema.jsonStringify(.{}, schema_stream.writer());
-                    std.log.err("TODO: {s}", .{schema_stream.getWritten()});
+                    std.log.err("Failed Schema: {s}, Test: {s}\n{s}", .{ schema_description, test_description, schema_stream.getWritten() });
                     return e;
                 };
                 defer compiled_schema.deinit(std.testing.allocator);
@@ -125,7 +129,7 @@ test "JSON Schema Test Suite" {
 
                         try schema.jsonStringify(.{}, schema_stream.writer());
                         try test_data.jsonStringify(.{}, data_stream.writer());
-                        std.log.err("TODO: S:\n{s}\nD:\n{s}", .{ schema_stream.getWritten(), data_stream.getWritten() });
+                        std.log.err("Failed Schema: {s}, Test: {s}\nS:\n{s}\nD:\n{s}", .{ schema_description, test_description, schema_stream.getWritten(), data_stream.getWritten() });
                         return e;
                     };
                 }
