@@ -591,6 +591,116 @@ const Not = struct {
     }
 };
 
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-enum
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-const
+const EnumConst = struct {
+    data: std.json.Array,
+
+    const Self = @This();
+
+    pub fn compile(allocator: Allocator, enum_schema: std.json.Value) Schema.CompileError!Self {
+        switch (enum_schema) {
+            .Array => |data| {
+                var copy_data = std.json.Array.init(allocator);
+                errdefer copy_data.deinit();
+                try copy_data.appendSlice(data.items);
+                return .{ .data = copy_data };
+            },
+            else => return error.EnumConstInvalidType,
+        }
+    }
+
+    fn eql(enum_s: std.json.Value, data: std.json.Value) Schema.ValidateError!bool {
+        switch (enum_s) {
+            .Object => {
+                if (std.meta.activeTag(enum_s) != std.meta.activeTag(data)) {
+                    return false;
+                }
+                if (enum_s.Object.count() != data.Object.count()) {
+                    return false;
+                }
+                var it = enum_s.Object.iterator();
+                while (it.next()) |elem| {
+                    if (data.Object.get(elem.key_ptr.*)) |val| {
+                        if (!try eql(val, elem.value_ptr.*)) {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                return true;
+            },
+            .Array => {
+                if (std.meta.activeTag(enum_s) != std.meta.activeTag(data)) {
+                    return false;
+                }
+                if (enum_s.Array.items.len != data.Array.items.len) {
+                    return false;
+                }
+                for (enum_s.Array.items) |e| {
+                    for (data.Array.items) |d| {
+                        if (try eql(e, d)) {
+                            break;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                return true;
+            },
+            .String => {
+                if (std.meta.activeTag(enum_s) != std.meta.activeTag(data)) {
+                    return false;
+                }
+                return std.mem.eql(u8, enum_s.String, data.String);
+            },
+            .Integer => {
+                if (std.meta.activeTag(data) != .Integer and std.meta.activeTag(data) != .Float) {
+                    return false;
+                }
+                if (std.meta.activeTag(data) == .Float) {
+                    if (@trunc(data.Float) == data.Float) {
+                        return enum_s.Integer == @floatToInt(i64, data.Float);
+                    }
+                    return false;
+                }
+                return enum_s.Integer == data.Integer;
+            },
+            .Float => {
+                if (std.meta.activeTag(data) != .Integer and std.meta.activeTag(data) != .Float) {
+                    return false;
+                }
+                if (std.meta.activeTag(data) == .Integer) {
+                    if (@trunc(enum_s.Float) == enum_s.Float) {
+                        return @floatToInt(i64, enum_s.Float) == data.Integer;
+                    }
+                    return false;
+                }
+                return enum_s.Float == data.Float;
+            },
+            .NumberString => return error.TODONumberString,
+            .Bool => {
+                if (std.meta.activeTag(enum_s) != std.meta.activeTag(data)) {
+                    return false;
+                }
+                return enum_s.Bool == data.Bool;
+            },
+            // Null has no payload and the tag type is check at top
+            .Null => return std.meta.activeTag(enum_s) == std.meta.activeTag(data),
+        }
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        for (self.data.items) |elem| {
+            if (try eql(elem, data)) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
 /// The root compiled schema object
 pub const Schema = union(enum) {
     Schemas: []Schema,
@@ -606,6 +716,7 @@ pub const Schema = union(enum) {
     MinMaxLength: MinMax,
     MinimumMaximumExclusive: MinimumMaximum,
     Not: Not,
+    EnumConst: EnumConst,
 
     const Self = @This();
 
@@ -625,6 +736,7 @@ pub const Schema = union(enum) {
         MultipleOfLessThanZero,
         AllAnyOneOfEmptyArray,
         InvalidAllOfType,
+        EnumConstInvalidType,
         NonExhaustiveSchemaValidators,
     } ||
         TODOError ||
@@ -785,6 +897,25 @@ pub const Schema = union(enum) {
                     schema_used += 1;
                 }
 
+                if (object.get("enum")) |enum_schema| {
+                    const sub_schema = Schema{ .EnumConst = try EnumConst.compile(allocator, enum_schema) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
+                }
+
+                if (object.get("const")) |const_schema| {
+                    // Const is a enum with one element.
+                    var enum_schema = std.json.Array.init(allocator);
+                    defer enum_schema.deinit();
+                    try enum_schema.append(const_schema);
+
+                    const sub_schema = Schema{ .EnumConst = try EnumConst.compile(allocator, .{ .Array = enum_schema }) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
+                }
+
                 if (object.count() != schema_used) {
                     return error.NonExhaustiveSchemaValidators;
                 }
@@ -833,6 +964,9 @@ pub const Schema = union(enum) {
             .Not => |not| {
                 not.schema.deinit(allocator);
                 allocator.destroy(not.schema);
+            },
+            .EnumConst => |enum_const_schema| {
+                enum_const_schema.data.deinit();
             },
             else => {},
         }

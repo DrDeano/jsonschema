@@ -18,12 +18,12 @@ A Zig implementation of the JSON schema validator.
 - [x] allOf
 - [x] anyOf
 - [x] boolean_schema
-- [ ] const
+- [x] const
 - [ ] contains
 - [ ] default
 - [ ] definitions
 - [ ] dependencies
-- [ ] enum
+- [x] enum
 - [x] exclusiveMaximum
 - [x] exclusiveMinimum
 - [ ] format

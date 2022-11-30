@@ -67,6 +67,8 @@ test "JSON Schema Test Suite" {
         test_files_dir ++ "allOf.json",
         test_files_dir ++ "anyOf.json",
         test_files_dir ++ "boolean_schema.json",
+        test_files_dir ++ "const.json",
+        test_files_dir ++ "enum.json",
         test_files_dir ++ "exclusiveMaximum.json",
         test_files_dir ++ "exclusiveMinimum.json",
         test_files_dir ++ "maximum.json",
