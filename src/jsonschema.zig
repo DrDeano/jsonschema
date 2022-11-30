@@ -501,9 +501,6 @@ const MultipleOf = struct {
 // https://json-schema.org/draft/2020-12/json-schema-core.html#name-anyof
 // https://json-schema.org/draft/2020-12/json-schema-core.html#name-oneof
 const AllAnyOneOf = struct {
-    // Would prefer Schema but complier doesn't yes support self dependency:
-    // https://github.com/ziglang/zig/issues/2746
-    // For now this is a pointer and will need to be freed
     schemas: []Schema,
     type_of: TypeOf,
 
@@ -514,11 +511,11 @@ const AllAnyOneOf = struct {
         One,
     };
 
-    pub fn compile(allocator: Allocator, all_of_schema: std.json.Value, type_of: TypeOf) Schema.CompileError!Self {
-        switch (all_of_schema) {
+    pub fn compile(allocator: Allocator, type_of_schema: std.json.Value, type_of: TypeOf) Schema.CompileError!Self {
+        switch (type_of_schema) {
             .Array => |array| {
                 if (array.items.len == 0) {
-                    return error.AllOfEmptyArray;
+                    return error.AllAnyOneOfEmptyArray;
                 }
                 var schemas = std.ArrayList(Schema).init(allocator);
                 errdefer {
@@ -573,6 +570,27 @@ const AllAnyOneOf = struct {
     }
 };
 
+// https://json-schema.org/draft/2020-12/json-schema-core.html#name-not
+const Not = struct {
+    // Would prefer Schema but complier doesn't yes support self dependency:
+    // https://github.com/ziglang/zig/issues/2746
+    // For now this is a pointer and will need to be freed
+    schema: *Schema,
+
+    const Self = @This();
+
+    pub fn compile(allocator: Allocator, not_schema: std.json.Value) Schema.CompileError!Self {
+        const sub_schema = try allocator.create(Schema);
+        errdefer allocator.destroy(sub_schema);
+        sub_schema.* = try Schema.compile(allocator, not_schema);
+        return .{ .schema = sub_schema };
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        return !try self.schema.validate(data);
+    }
+};
+
 /// The root compiled schema object
 pub const Schema = union(enum) {
     Schemas: []Schema,
@@ -587,6 +605,7 @@ pub const Schema = union(enum) {
     OneOf: AllAnyOneOf,
     MinMaxLength: MinMax,
     MinimumMaximumExclusive: MinimumMaximum,
+    Not: Not,
 
     const Self = @This();
 
@@ -604,7 +623,7 @@ pub const Schema = union(enum) {
         InvalidMinimumMaximumType,
         InvalidMultipleOfType,
         MultipleOfLessThanZero,
-        AllOfEmptyArray,
+        AllAnyOneOfEmptyArray,
         InvalidAllOfType,
         NonExhaustiveSchemaValidators,
     } ||
@@ -731,15 +750,15 @@ pub const Schema = union(enum) {
                     schema_used += 1;
                 }
 
-                if (object.get("anyOf")) |all_of_schema| {
-                    const sub_schema = Schema{ .AnyOf = try AllAnyOneOf.compile(allocator, all_of_schema, .Any) };
+                if (object.get("anyOf")) |any_of_schema| {
+                    const sub_schema = Schema{ .AnyOf = try AllAnyOneOf.compile(allocator, any_of_schema, .Any) };
                     errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     schema_used += 1;
                 }
 
-                if (object.get("oneOf")) |all_of_schema| {
-                    const sub_schema = Schema{ .OneOf = try AllAnyOneOf.compile(allocator, all_of_schema, .One) };
+                if (object.get("oneOf")) |one_of_schema| {
+                    const sub_schema = Schema{ .OneOf = try AllAnyOneOf.compile(allocator, one_of_schema, .One) };
                     errdefer sub_schema.deinit(allocator);
                     try schema_list.append(sub_schema);
                     schema_used += 1;
@@ -757,6 +776,13 @@ pub const Schema = union(enum) {
                     if (max_length_schema) |_| {
                         schema_used += 1;
                     }
+                }
+
+                if (object.get("not")) |not_schema| {
+                    const sub_schema = Schema{ .Not = try Not.compile(allocator, not_schema) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
                 }
 
                 if (object.count() != schema_used) {
@@ -803,6 +829,10 @@ pub const Schema = union(enum) {
                     schemas.deinit(allocator);
                 }
                 allocator.free(all_of.schemas);
+            },
+            .Not => |not| {
+                not.schema.deinit(allocator);
+                allocator.destroy(not.schema);
             },
             else => {},
         }

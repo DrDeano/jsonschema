@@ -40,7 +40,7 @@ A Zig implementation of the JSON schema validator.
 - [x] minLength
 - [ ] minProperties
 - [x] multipleOf
-- [ ] not
+- [x] not
 - [x] oneOf
 - [ ] opt
 - [ ] pattern

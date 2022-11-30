@@ -76,6 +76,7 @@ test "JSON Schema Test Suite" {
         test_files_dir ++ "minItems.json",
         test_files_dir ++ "minLength.json",
         test_files_dir ++ "multipleOf.json",
+        test_files_dir ++ "not.json",
         test_files_dir ++ "oneOf.json",
         test_files_dir ++ "patternProperties.json",
         test_files_dir ++ "properties.json",
