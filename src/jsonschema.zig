@@ -270,14 +270,14 @@ const MinimumMaximum = struct {
     }
 };
 
-const Pattern = struct {
+const PatternProperties = struct {
     pattern: []const u8,
     required: bool,
 };
 
 const AllPattern = struct {
     pattern: union(enum) {
-        All: Pattern,
+        All: PatternProperties,
         Regex: regex.Regex,
     },
     matches: Schema,
@@ -701,6 +701,32 @@ const EnumConst = struct {
     }
 };
 
+// https://json-schema.org/draft/2020-12/json-schema-validation.html#name-pattern
+const Pattern = struct {
+    reg_pattern: *regex.Regex,
+
+    const Self = @This();
+
+    pub fn compile(allocator: Allocator, pattern_schema: std.json.Value) Schema.CompileError!Self {
+        switch (pattern_schema) {
+            .String => |str| {
+                var reg = try allocator.create(regex.Regex);
+                reg.* = try regex.Regex.compile(allocator, str);
+                errdefer reg.deinit();
+                return .{ .reg_pattern = reg };
+            },
+            else => return error.InvalidPatternType,
+        }
+    }
+
+    pub fn validate(self: Self, data: std.json.Value) Schema.ValidateError!bool {
+        switch (data) {
+            .String => |str| return try self.reg_pattern.partialMatch(str),
+            else => return true,
+        }
+    }
+};
+
 /// The root compiled schema object
 pub const Schema = union(enum) {
     Schemas: []Schema,
@@ -717,6 +743,7 @@ pub const Schema = union(enum) {
     MinimumMaximumExclusive: MinimumMaximum,
     Not: Not,
     EnumConst: EnumConst,
+    Pattern: Pattern,
 
     const Self = @This();
 
@@ -737,6 +764,7 @@ pub const Schema = union(enum) {
         AllAnyOneOfEmptyArray,
         InvalidAllOfType,
         EnumConstInvalidType,
+        InvalidPatternType,
         NonExhaustiveSchemaValidators,
     } ||
         TODOError ||
@@ -916,6 +944,13 @@ pub const Schema = union(enum) {
                     schema_used += 1;
                 }
 
+                if (object.get("pattern")) |pattern_schema| {
+                    const sub_schema = Schema{ .Pattern = try Pattern.compile(allocator, pattern_schema) };
+                    errdefer sub_schema.deinit(allocator);
+                    try schema_list.append(sub_schema);
+                    schema_used += 1;
+                }
+
                 if (object.count() != schema_used) {
                     return error.NonExhaustiveSchemaValidators;
                 }
@@ -967,6 +1002,10 @@ pub const Schema = union(enum) {
             },
             .EnumConst => |enum_const_schema| {
                 enum_const_schema.data.deinit();
+            },
+            .Pattern => |pattern| {
+                pattern.reg_pattern.deinit();
+                allocator.destroy(pattern.reg_pattern);
             },
             else => {},
         }

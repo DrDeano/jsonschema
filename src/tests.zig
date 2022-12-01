@@ -80,6 +80,7 @@ test "JSON Schema Test Suite" {
         test_files_dir ++ "multipleOf.json",
         test_files_dir ++ "not.json",
         test_files_dir ++ "oneOf.json",
+        test_files_dir ++ "pattern.json",
         test_files_dir ++ "patternProperties.json",
         test_files_dir ++ "properties.json",
         test_files_dir ++ "required.json",
